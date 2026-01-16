@@ -22,19 +22,28 @@ jobs:
         pip install -r requirements.txt
         pip install pyinstaller
 
+    # [중요] 맥용 FFmpeg 다운로드 및 권한 설정
+    - name: Download FFmpeg for Mac
+      run: |
+        curl -L -o ffmpeg.zip https://evermeet.cx/ffmpeg/ffmpeg-6.0.zip
+        unzip ffmpeg.zip
+        chmod +x ffmpeg
+        echo "FFmpeg downloaded successfully"
+
     - name: Build App with PyInstaller
       run: |
-        # 맥용 앱(.app) 만들기
-        pyinstaller --noconfirm --windowed --name "VoiceSeparator" gui_main.py
+        # --add-binary 옵션으로 ffmpeg 파일을 앱 내부로 포함시킴
+        pyinstaller --noconfirm --windowed --name "VoiceSeparator" \
+        --add-binary "ffmpeg:." \
+        gui_main.py
 
     - name: Zip the App
       run: |
-        # 친구에게 보내기 쉽게 zip으로 압축
         cd dist
-        zip -r VoiceSeparator_Mac.zip VoiceSeparator.app
+        zip -r VoiceSeparator_Mac_Full.zip VoiceSeparator.app
 
     - name: Upload Artifact
       uses: actions/upload-artifact@v4
       with:
-        name: VoiceSeparator-Mac
-        path: dist/VoiceSeparator_Mac.zip
+        name: VoiceSeparator-Mac-Full
+        path: dist/VoiceSeparator_Mac_Full.zip
