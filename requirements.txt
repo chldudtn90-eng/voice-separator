@@ -1,0 +1,7 @@
+yt-dlp
+demucs
+soundfile
+torch
+torchaudio
+numpy
+setuptools
