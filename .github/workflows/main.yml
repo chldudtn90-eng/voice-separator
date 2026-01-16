@@ -1,0 +1,40 @@
+name: Build Mac App
+
+on:
+  push:
+    branches: [ "main" ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-latest
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.10'
+
+    - name: Install dependencies
+      run: |
+        pip install -r requirements.txt
+        pip install pyinstaller
+
+    - name: Build App with PyInstaller
+      run: |
+        # 맥용 앱(.app) 만들기
+        pyinstaller --noconfirm --windowed --name "VoiceSeparator" gui_main.py
+
+    - name: Zip the App
+      run: |
+        # 친구에게 보내기 쉽게 zip으로 압축
+        cd dist
+        zip -r VoiceSeparator_Mac.zip VoiceSeparator.app
+
+    - name: Upload Artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: VoiceSeparator-Mac
+        path: dist/VoiceSeparator_Mac.zip
