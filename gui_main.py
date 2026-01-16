@@ -9,10 +9,19 @@ import platform
 import re
 import locale
 
+# --- [중요] 앱 내부의 FFmpeg를 인식하도록 경로 설정 ---
+# PyInstaller로 포장된 앱(frozen 상태)에서 실행될 때,
+# 임시 압축 해제 폴더(sys._MEIPASS)를 시스템 PATH에 추가하여
+# subprocess가 ffmpeg 명령어를 바로 찾을 수 있게 함.
+if getattr(sys, 'frozen', False):
+    bundle_dir = sys._MEIPASS
+    os.environ["PATH"] += os.pathsep + bundle_dir
+
 # --- 설정 ---
 BASE_PATH = Path(__file__).parent
 DOWNLOADS_DIR = "downloads"
 SEPARATED_DIR = "separated"
+# 윈도우 로컬 테스트용 Rubberband 경로 (그대로 유지)
 RUBBERBAND_PATH = "C:/ffmpeg/rubberband-4.0.0-gpl-executable-windows"
 SYSTEM_ENCODING = locale.getpreferredencoding()
 
@@ -21,18 +30,13 @@ class OutputRedirector:
     def __init__(self, text_widget, progress_var):
         self.text_widget = text_widget
         self.progress_var = progress_var
-        self.buffer = ""
 
     def write(self, string):
-        # 1. 텍스트 창에 로그 출력
-        # \r(커서 복귀) 처리를 위해 단순 삽입 대신 약간의 트릭 사용 가능하지만,
-        # 여기서는 로그가 너무 쌓이지 않게 라인 단위로 처리
         try:
             self.text_widget.insert(tk.END, string)
             self.text_widget.see(tk.END)
             
-            # 2. 진행률(%) 파싱
-            # " 35%" 또는 "35.5%" 같은 패턴을 찾음
+            # 진행률 파싱
             match = re.search(r"(\d+\.?\d*)%", string)
             if match:
                 try:
@@ -48,22 +52,16 @@ class OutputRedirector:
 
 def read_pipe(process, text_widget, progress_var):
     """프로세스의 출력을 실시간으로 읽어서 GUI에 뿌려주는 함수"""
-    # 윈도우 인코딩 문제 해결을 위해 cp949 또는 utf-8 시도
-    encoding = 'utf-8' if platform.system() != 'Windows' else 'cp949'
-    
-    # 한 글자씩 읽어서 GUI 반응성을 높임 (Progress Bar 업데이트용)
     while True:
+        # 한 글자씩 읽어서 GUI 반응성을 높임
         char = process.stdout.read(1)
         if not char and process.poll() is not None:
             break
         if char:
-            # 텍스트 위젯에 출력
             text_widget.insert(tk.END, char)
             text_widget.see(tk.END)
             
-            # 진행률 파싱 (줄바꿈이나 공백 기준으로 버퍼 확인)
             if char in ('\r', '\n', '%'):
-                # 현재 텍스트 위젯의 마지막 줄을 가져와서 분석
                 last_line = text_widget.get("end-2c linestart", "end-1c")
                 match = re.search(r"(\d+\.?\d*)%", last_line)
                 if match:
@@ -77,7 +75,7 @@ def run_process_thread(input_str, mode, pitch_val=0):
     """실제 작업을 수행하는 백그라운드 스레드"""
     
     btn_run.config(state=tk.DISABLED)
-    progress_var.set(0) # 진행률 0으로 초기화
+    progress_var.set(0)
     
     try:
         python_exec = sys.executable
@@ -92,7 +90,6 @@ def run_process_thread(input_str, mode, pitch_val=0):
         if input_str.startswith(('http://', 'https://')):
             print(f"\n[1단계] 유튜브 다운로드 시작: {input_str}")
             
-            # yt-dlp 명령어 (진행률 파싱을 위해 --newline 옵션 추가 고려했으나, 기본 출력도 읽도록 처리함)
             cmd = [
                 "yt-dlp", "-f", "bestaudio",
                 "-o", f"{downloads_path}/%(title)s.%(ext)s",
@@ -100,23 +97,20 @@ def run_process_thread(input_str, mode, pitch_val=0):
                 input_str
             ]
             
-            # subprocess.Popen으로 실시간 출력 캡처
             process = subprocess.Popen(
                 cmd, 
                 stdout=subprocess.PIPE, 
-                stderr=subprocess.STDOUT, # 에러도 표준출력으로 합침
+                stderr=subprocess.STDOUT,
                 universal_newlines=True, 
                 encoding=SYSTEM_ENCODING,
                 creationflags=subprocess.CREATE_NO_WINDOW if platform.system()=='Windows' else 0
             )
             
-            # 출력 읽기 루프
             read_pipe(process, log_text, progress_var)
             
             if process.returncode != 0:
                 raise Exception("다운로드 중 오류가 발생했습니다.")
 
-            # 가장 최근 파일 찾기
             wav_files = list(downloads_path.glob("*.wav"))
             if not wav_files:
                 raise Exception("다운로드된 파일을 찾을 수 없습니다.")
@@ -129,7 +123,7 @@ def run_process_thread(input_str, mode, pitch_val=0):
             if not target_file.exists():
                 raise Exception("파일이 존재하지 않습니다.")
 
-        progress_var.set(0) # 단계 넘어가면 리셋
+        progress_var.set(0)
 
         # --- 2. 작업 수행 ---
         if mode == "separate":
@@ -175,7 +169,6 @@ def run_process_thread(input_str, mode, pitch_val=0):
                 str(target_file), str(output_path)
             ]
             
-            # Rubberband는 출력이 적어서 그냥 run 사용 (빠름)
             subprocess.run(cmd, check=True, creationflags=subprocess.CREATE_NO_WINDOW if platform.system()=='Windows' else 0)
             
             print(f"\n🎉 변환 완료! 파일: {output_path}")
@@ -214,7 +207,7 @@ def select_file():
 
 # --- GUI 구성 ---
 root = tk.Tk()
-root.title("AI 음원 분리 & 키 조절기 v2.0")
+root.title("AI 음원 분리 & 키 조절기 v2.1 (FFmpeg 내장)")
 root.geometry("600x600")
 
 # 1. 입력창
@@ -241,7 +234,6 @@ frame_run.pack(fill="x")
 btn_run = tk.Button(frame_run, text="작업 시작 🚀", command=start_job, bg="lightblue", height=2, font=("Arial", 12, "bold"))
 btn_run.pack(fill="x", padx=10, pady=5)
 
-# 진행률 바 (Progress Bar)
 tk.Label(frame_run, text="작업 진행률:").pack(anchor="w", padx=10)
 progress_var = tk.DoubleVar()
 progress_bar = ttk.Progressbar(frame_run, maximum=100, variable=progress_var)
@@ -253,7 +245,6 @@ frame_log.pack(fill="both", expand=True, padx=10, pady=5)
 log_text = scrolledtext.ScrolledText(frame_log, height=10)
 log_text.pack(fill="both", expand=True)
 
-# 표준 출력 연결 (초기화용)
 sys.stdout = OutputRedirector(log_text, progress_var)
 
 root.mainloop()
